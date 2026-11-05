@@ -37,6 +37,7 @@ type VooLogistica = {
   partida_volta: string
   hotel: string
   observacoes: string
+  responsavel?: string
 }
 
 const CIDADES_OPCOES = [
@@ -69,6 +70,7 @@ const MINUTOS_DISPONIVEIS = [
   '55',
 ]
 const SENHA_MASTER = '1987'
+const SENHAS_LOGISTICA_6_DIGITOS = ['198700', '123456']
 
 function formatarDataBR(dataIso: string) {
   if (!dataIso) return ''
@@ -81,9 +83,22 @@ function formatarDataBR(dataIso: string) {
   return dataIso
 }
 
+function dataBrParaChaveOrdenacao(dataBr: string) {
+  if (!dataBr) return '9999-99-99'
+  if (dataBr.includes('/')) {
+    const [dia, mes, ano] = dataBr.split('/')
+    if (ano && mes && dia) {
+      return `${ano}-${mes.padStart(2, '0')}-${dia.padStart(2, '0')}`
+    }
+  }
+  return dataBr
+}
+
 export default function PainelLogistica() {
   const [mounted, setMounted] = useState(false)
-  const [abaAtiva, setAbaAtiva] = useState<'caronas' | 'voos'>('caronas')
+  const [abaAtiva, setAbaAtiva] = useState<'caronas' | 'voos' | 'logistica'>(
+    'caronas'
+  )
   const [filtroOrigem, setFiltroOrigem] = useState<string>('TODAS')
   const [filtroData, setFiltroData] = useState<string>('TODAS')
 
@@ -116,8 +131,27 @@ export default function PainelLogistica() {
   const [voos, setVoos] = useState<VooLogistica[]>([])
   const [modalVoo, setModalVoo] = useState(false)
   const [vooEmEdicao, setVooEmEdicao] = useState<VooLogistica | null>(null)
+  const [vooEnviadoSucesso, setVooEnviadoSucesso] = useState(false)
 
-  const [formVoo, setFormVoo] = useState({
+  // Estados da Aba Equipe da Logística (senha de 6 dígitos)
+  const [logisticaAutenticada, setLogisticaAutenticada] = useState(false)
+  const [senhaLogisticaInput, setSenhaLogisticaInput] = useState('')
+  const [erroSenhaLogistica, setErroSenhaLogistica] = useState('')
+  const [filtroDataLogistica, setFiltroDataLogistica] =
+    useState<string>('TODAS')
+  const [filtroStatusResponsavel, setFiltroStatusResponsavel] =
+    useState<string>('TODOS')
+  const [responsaveisEdit, setResponsaveisEdit] = useState<{
+    [id: string]: string
+  }>({})
+  const [salvandoResponsavelId, setSalvandoResponsavelId] = useState<
+    string | null
+  >(null)
+  const [salvoResponsavelId, setSalvoResponsavelId] = useState<string | null>(
+    null
+  )
+
+  const estadoInicialFormVoo = {
     amigo_nome: '',
     data_ida: '',
     n_voo_ida: '',
@@ -144,7 +178,10 @@ export default function PainelLogistica() {
     hotelSelect: 'WTC',
     hotelOutro: '',
     observacoes: '',
-  })
+    responsavel: '',
+  }
+
+  const [formVoo, setFormVoo] = useState(estadoInicialFormVoo)
 
   useEffect(() => {
     setMounted(true)
@@ -159,7 +196,14 @@ export default function PainelLogistica() {
 
       const resVoos = await fetch('/api/voos')
       const dadosV = await resVoos.json()
-      if (Array.isArray(dadosV)) setVoos(dadosV)
+      if (Array.isArray(dadosV)) {
+        setVoos(dadosV)
+        const mapaResp: { [id: string]: string } = {}
+        dadosV.forEach((v: VooLogistica) => {
+          mapaResp[String(v.id)] = v.responsavel || ''
+        })
+        setResponsaveisEdit(mapaResp)
+      }
     } catch (e) {
       console.error('Erro ao carregar dados', e)
     }
@@ -421,6 +465,7 @@ export default function PainelLogistica() {
       partida_volta: `${formVoo.partida_volta_h}:${formVoo.partida_volta_m}`,
       hotel: hotelFinal,
       observacoes: formVoo.observacoes || '',
+      responsavel: formVoo.responsavel || '',
     }
 
     const metodo = vooEmEdicao ? 'PUT' : 'POST'
@@ -433,9 +478,50 @@ export default function PainelLogistica() {
     if (res.ok) {
       setModalVoo(false)
       setVooEmEdicao(null)
+      setFormVoo(estadoInicialFormVoo)
+      if (!vooEmEdicao && abaAtiva === 'voos') {
+        setVooEnviadoSucesso(true)
+      }
       carregarDados()
     } else {
       alert('Erro ao salvar voo.')
+    }
+  }
+
+  const handleSalvarResponsavel = async (vooId: string) => {
+    setSalvandoResponsavelId(String(vooId))
+    try {
+      const responsavel = (responsaveisEdit[String(vooId)] || '').trim()
+      const res = await fetch('/api/voos', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: vooId, responsavel }),
+      })
+      if (res.ok) {
+        setSalvoResponsavelId(String(vooId))
+        setTimeout(() => {
+          setSalvoResponsavelId((atual) =>
+            atual === String(vooId) ? null : atual
+          )
+        }, 2000)
+        await carregarDados()
+      } else {
+        alert('Erro ao salvar responsável.')
+      }
+    } finally {
+      setSalvandoResponsavelId(null)
+    }
+  }
+
+  const handleAutenticarLogistica = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (SENHAS_LOGISTICA_6_DIGITOS.includes(senhaLogisticaInput.trim())) {
+      setLogisticaAutenticada(true)
+      setErroSenhaLogistica('')
+    } else {
+      setErroSenhaLogistica(
+        'Senha incorreta! Digite a senha de 6 dígitos da equipe de logística.'
+      )
     }
   }
 
@@ -512,6 +598,7 @@ export default function PainelLogistica() {
       hotelSelect: hotelPadrao,
       hotelOutro: hotelPadrao === 'Outro' ? hotelVal : '',
       observacoes: voo.observacoes || '',
+      responsavel: voo.responsavel || '',
     })
     setModalVoo(true)
   }
@@ -523,7 +610,7 @@ export default function PainelLogistica() {
     else alert('Erro ao excluir voo.')
   }
 
-  // Obter lista única de datas disponíveis para o filtro de pesquisa
+  // Obter lista única de datas disponíveis para o filtro de pesquisa de caronas
   const todasAsDatas = Array.from(
     new Set(caronas.map((c) => c.data_ida).filter(Boolean))
   )
@@ -554,14 +641,56 @@ export default function PainelLogistica() {
     )
   })
 
-  const datasOrdenadas = Object.keys(caronasPorData).sort((a, b) => {
-    if (a.includes('/') && b.includes('/')) {
-      const [diaA, mesA, anoA] = a.split('/')
-      const [diaB, mesB, anoB] = b.split('/')
-      return `${anoA}-${mesA}-${diaA}`.localeCompare(`${anoB}-${mesB}-${diaB}`)
+  const datasOrdenadas = Object.keys(caronasPorData).sort((a, b) =>
+    dataBrParaChaveOrdenacao(a).localeCompare(dataBrParaChaveOrdenacao(b))
+  )
+
+  // Ordenação dos voos para a Equipe da Logística (por Data de Chegada e Horário de Chegada)
+  const datasChegadaVoos = Array.from(
+    new Set(voos.map((v) => v.data_ida).filter(Boolean))
+  ).sort((a, b) =>
+    dataBrParaChaveOrdenacao(a).localeCompare(dataBrParaChaveOrdenacao(b))
+  )
+
+  const voosFiltradosLogistica = voos
+    .filter((v) => {
+      const matchData =
+        filtroDataLogistica === 'TODAS' ||
+        (v.data_ida || 'Data não informada') === filtroDataLogistica
+      const temResp = Boolean(v.responsavel && v.responsavel.trim())
+      const matchStatus =
+        filtroStatusResponsavel === 'TODOS' ||
+        (filtroStatusResponsavel === 'COM_RESPONSAVEL' && temResp) ||
+        (filtroStatusResponsavel === 'SEM_RESPONSAVEL' && !temResp)
+      return matchData && matchStatus
+    })
+    .sort((a, b) => {
+      const cmpData = dataBrParaChaveOrdenacao(a.data_ida || '').localeCompare(
+        dataBrParaChaveOrdenacao(b.data_ida || '')
+      )
+      if (cmpData !== 0) return cmpData
+      const horaA = a.chegada_ida || a.partida_ida || '99:99'
+      const horaB = b.chegada_ida || b.partida_ida || '99:99'
+      return horaA.localeCompare(horaB)
+    })
+
+  const voosPorDataChegada: { [data: string]: VooLogistica[] } = {}
+  voosFiltradosLogistica.forEach((v) => {
+    const key = v.data_ida || 'Data não informada'
+    if (!voosPorDataChegada[key]) {
+      voosPorDataChegada[key] = []
     }
-    return a.localeCompare(b)
+    voosPorDataChegada[key].push(v)
   })
+
+  const datasLogisticaOrdenadas = Object.keys(voosPorDataChegada).sort((a, b) =>
+    dataBrParaChaveOrdenacao(a).localeCompare(dataBrParaChaveOrdenacao(b))
+  )
+
+  const totalComResponsavel = voos.filter(
+    (v) => v.responsavel && v.responsavel.trim()
+  ).length
+  const totalSemResponsavel = voos.length - totalComResponsavel
 
   if (!mounted) return null
 
@@ -581,10 +710,10 @@ export default function PainelLogistica() {
               Gestão de transporte terrestre e recepção
             </p>
           </div>
-          <div className="flex bg-slate-900 p-1 rounded-lg border border-slate-700 w-full sm:w-auto">
+          <div className="flex flex-wrap bg-slate-900 p-1 rounded-lg border border-slate-700 w-full sm:w-auto gap-1">
             <button
               onClick={() => setAbaAtiva('caronas')}
-              className={`flex-1 sm:flex-initial px-4 py-1.5 rounded-md text-xs font-semibold transition cursor-pointer ${
+              className={`flex-1 sm:flex-initial px-3.5 py-1.5 rounded-md text-xs font-semibold transition cursor-pointer ${
                 abaAtiva === 'caronas'
                   ? 'bg-emerald-600 text-white'
                   : 'text-slate-400 hover:text-white'
@@ -594,13 +723,23 @@ export default function PainelLogistica() {
             </button>
             <button
               onClick={() => setAbaAtiva('voos')}
-              className={`flex-1 sm:flex-initial px-4 py-1.5 rounded-md text-xs font-semibold transition cursor-pointer ${
+              className={`flex-1 sm:flex-initial px-3.5 py-1.5 rounded-md text-xs font-semibold transition cursor-pointer ${
                 abaAtiva === 'voos'
                   ? 'bg-emerald-600 text-white'
                   : 'text-slate-400 hover:text-white'
               }`}
             >
-              🛫 Voos & Hotéis
+              🛫 Informar Voo/Hotel
+            </button>
+            <button
+              onClick={() => setAbaAtiva('logistica')}
+              className={`flex-1 sm:flex-initial px-3.5 py-1.5 rounded-md text-xs font-semibold transition cursor-pointer ${
+                abaAtiva === 'logistica'
+                  ? 'bg-emerald-600 text-white'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              🔒 Equipe Logística
             </button>
           </div>
         </div>
@@ -824,107 +963,894 @@ export default function PainelLogistica() {
           </div>
         )}
 
-        {/* ABA VOOS & HOTÉIS */}
+        {/* ABA PÚBLICA: INFORMAR VOO & HOSPEDAGEM (SEM LISTAR OS DADOS DOS OUTROS) */}
         {abaAtiva === 'voos' && (
           <div className="space-y-4">
-            <div className="flex justify-between items-center bg-slate-800/80 p-3 rounded-xl border border-slate-700">
-              <h2 className="text-sm font-semibold text-slate-300 uppercase">
-                Logística de Voos e Hospedagem
-              </h2>
-              <button
-                onClick={() => {
-                  setVooEmEdicao(null)
-                  setModalVoo(true)
-                }}
-                className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold px-4 py-2 rounded-lg cursor-pointer"
-              >
-                + Informar Voo/Hotel
-              </button>
-            </div>
-            <div className="space-y-3">
-              {voos.length === 0 && (
-                <div className="bg-slate-800/50 border border-slate-700/50 rounded-xl p-6 text-center text-xs text-slate-400">
-                  Nenhum voo ou hotel cadastrado ainda.
+            <div className="bg-slate-800 border border-slate-700 rounded-xl p-6 shadow-lg">
+              {vooEnviadoSucesso ? (
+                <div className="py-8 text-center space-y-4">
+                  <div className="mx-auto w-14 h-14 rounded-full bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-2xl">
+                    ✅
+                  </div>
+                  <h2 className="text-lg font-bold text-emerald-400">
+                    Dados enviados com sucesso!
+                  </h2>
+                  <p className="text-sm text-slate-300 max-w-md mx-auto">
+                    Seus dados de voo e hospedagem foram enviados para a{' '}
+                    <strong className="text-emerald-300">
+                      Equipe da Logística
+                    </strong>
+                    .
+                  </p>
+                  <p className="text-xs text-slate-400 max-w-md mx-auto">
+                    Por privacidade, as informações preenchidas ficam visíveis
+                    apenas para a equipe responsável pela recepção.
+                  </p>
+                  <div className="pt-3">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFormVoo(estadoInicialFormVoo)
+                        setVooEnviadoSucesso(false)
+                      }}
+                      className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold px-5 py-2.5 rounded-lg transition cursor-pointer"
+                    >
+                      + Informar outro Voo / Hotel
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="max-w-xl mx-auto space-y-4">
+                  <div className="border-b border-slate-700 pb-3">
+                    <h2 className="text-base font-bold text-emerald-400">
+                      🛫 Informar Voo & Hospedagem
+                    </h2>
+                    <p className="text-xs text-slate-400 mt-1">
+                      Preencha os dados da sua chegada, retorno e hotel. Seus
+                      dados serão enviados diretamente para a equipe da
+                      Logística.
+                    </p>
+                  </div>
+
+                  <form
+                    onSubmit={handleSalvarVoo}
+                    className="space-y-3 text-xs"
+                    autoComplete="off"
+                  >
+                    <div>
+                      <label className="text-slate-400 block mb-1">
+                        Nome do Amigo(a)
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="Digite seu nome (ou apelido)"
+                        value={formVoo.amigo_nome}
+                        onChange={(e) =>
+                          setFormVoo({ ...formVoo, amigo_nome: e.target.value })
+                        }
+                        className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white"
+                      />
+                    </div>
+
+                    <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-700 space-y-2">
+                      <div className="font-semibold text-emerald-300">
+                        🛫 Voo de IDA (Chegada)
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="text-slate-400 block mb-1">
+                            Data de Chegada (Ida)
+                          </label>
+                          <input
+                            type="date"
+                            required
+                            value={formVoo.data_ida}
+                            onChange={(e) =>
+                              setFormVoo({
+                                ...formVoo,
+                                data_ida: e.target.value,
+                              })
+                            }
+                            onClick={(e) =>
+                              (
+                                e.currentTarget as HTMLInputElement
+                              ).showPicker?.()
+                            }
+                            className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white cursor-pointer"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-slate-400 block mb-1">
+                            N° Voo (Ida)
+                          </label>
+                          <input
+                            type="text"
+                            placeholder="Ex: 3106"
+                            value={formVoo.n_voo_ida}
+                            onChange={(e) =>
+                              setFormVoo({
+                                ...formVoo,
+                                n_voo_ida: e.target.value,
+                              })
+                            }
+                            className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white"
+                          />
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-3 gap-2">
+                        <div>
+                          <label className="text-slate-400 block mb-1">
+                            Cia Aérea
+                          </label>
+                          <select
+                            value={formVoo.ciaAereaIdaSelect}
+                            onChange={(e) =>
+                              setFormVoo({
+                                ...formVoo,
+                                ciaAereaIdaSelect: e.target.value,
+                              })
+                            }
+                            className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white"
+                          >
+                            {CIA_AEREAS_OPCOES.map((c) => (
+                              <option key={c} value={c}>
+                                {c}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="text-slate-400 block mb-1">
+                            Origem
+                          </label>
+                          <select
+                            value={formVoo.aeroportoOrigemSelect}
+                            onChange={(e) =>
+                              setFormVoo({
+                                ...formVoo,
+                                aeroportoOrigemSelect: e.target.value,
+                              })
+                            }
+                            className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white"
+                          >
+                            {AEROPORTOS_OPCOES.map((a) => (
+                              <option key={a} value={a}>
+                                {a}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="text-slate-400 block mb-1">
+                            Destino
+                          </label>
+                          <select
+                            value={formVoo.aeroportoDestinoSelect}
+                            onChange={(e) =>
+                              setFormVoo({
+                                ...formVoo,
+                                aeroportoDestinoSelect: e.target.value,
+                              })
+                            }
+                            className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white"
+                          >
+                            {AEROPORTOS_OPCOES.map((a) => (
+                              <option key={a} value={a}>
+                                {a}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                      {formVoo.ciaAereaIdaSelect === 'Outra' && (
+                        <input
+                          type="text"
+                          placeholder="Outra Cia Ida"
+                          value={formVoo.ciaAereaIdaOutra || ''}
+                          onChange={(e) =>
+                            setFormVoo({
+                              ...formVoo,
+                              ciaAereaIdaOutra: e.target.value,
+                            })
+                          }
+                          className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white mt-1"
+                        />
+                      )}
+                      {formVoo.aeroportoOrigemSelect === 'Outro' && (
+                        <input
+                          type="text"
+                          placeholder="Outro Aeroporto Origem"
+                          value={formVoo.aeroportoOrigemOutro || ''}
+                          onChange={(e) =>
+                            setFormVoo({
+                              ...formVoo,
+                              aeroportoOrigemOutro: e.target.value,
+                            })
+                          }
+                          className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white mt-1"
+                        />
+                      )}
+                      {formVoo.aeroportoDestinoSelect === 'Outro' && (
+                        <input
+                          type="text"
+                          placeholder="Outro Aeroporto Destino"
+                          value={formVoo.aeroportoDestinoOutro || ''}
+                          onChange={(e) =>
+                            setFormVoo({
+                              ...formVoo,
+                              aeroportoDestinoOutro: e.target.value,
+                            })
+                          }
+                          className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white mt-1"
+                        />
+                      )}
+                      <div className="grid grid-cols-2 gap-2 pt-1">
+                        <div>
+                          <label className="text-slate-400 block mb-1">
+                            Horário Partida
+                          </label>
+                          <div className="flex gap-1">
+                            <select
+                              value={formVoo.partida_ida_h}
+                              onChange={(e) =>
+                                setFormVoo({
+                                  ...formVoo,
+                                  partida_ida_h: e.target.value,
+                                })
+                              }
+                              className="bg-slate-900 border border-slate-700 rounded p-1.5 text-white flex-1"
+                            >
+                              {HORAS_DISPONIVEIS.map((h) => (
+                                <option key={h} value={h}>
+                                  {h}
+                                </option>
+                              ))}
+                            </select>
+                            <span className="self-center">:</span>
+                            <select
+                              value={formVoo.partida_ida_m}
+                              onChange={(e) =>
+                                setFormVoo({
+                                  ...formVoo,
+                                  partida_ida_m: e.target.value,
+                                })
+                              }
+                              className="bg-slate-900 border border-slate-700 rounded p-1.5 text-white flex-1"
+                            >
+                              {MINUTOS_DISPONIVEIS.map((m) => (
+                                <option key={m} value={m}>
+                                  {m}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+                        <div>
+                          <label className="text-slate-400 block mb-1">
+                            Horário Chegada
+                          </label>
+                          <div className="flex gap-1">
+                            <select
+                              value={formVoo.chegada_ida_h}
+                              onChange={(e) =>
+                                setFormVoo({
+                                  ...formVoo,
+                                  chegada_ida_h: e.target.value,
+                                })
+                              }
+                              className="bg-slate-900 border border-slate-700 rounded p-1.5 text-white flex-1"
+                            >
+                              {HORAS_DISPONIVEIS.map((h) => (
+                                <option key={h} value={h}>
+                                  {h}
+                                </option>
+                              ))}
+                            </select>
+                            <span className="self-center">:</span>
+                            <select
+                              value={formVoo.chegada_ida_m}
+                              onChange={(e) =>
+                                setFormVoo({
+                                  ...formVoo,
+                                  chegada_ida_m: e.target.value,
+                                })
+                              }
+                              className="bg-slate-900 border border-slate-700 rounded p-1.5 text-white flex-1"
+                            >
+                              {MINUTOS_DISPONIVEIS.map((m) => (
+                                <option key={m} value={m}>
+                                  {m}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-700 space-y-2">
+                      <div className="font-semibold text-amber-300">
+                        🛬 Voo de VOLTA (Retorno)
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="text-slate-400 block mb-1">
+                            Data Volta
+                          </label>
+                          <input
+                            type="date"
+                            value={formVoo.data_volta}
+                            onChange={(e) =>
+                              setFormVoo({
+                                ...formVoo,
+                                data_volta: e.target.value,
+                              })
+                            }
+                            onClick={(e) =>
+                              (
+                                e.currentTarget as HTMLInputElement
+                              ).showPicker?.()
+                            }
+                            className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white cursor-pointer"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-slate-400 block mb-1">
+                            N° Voo (Volta)
+                          </label>
+                          <input
+                            type="text"
+                            placeholder="Ex: 3103"
+                            value={formVoo.n_voo_volta}
+                            onChange={(e) =>
+                              setFormVoo({
+                                ...formVoo,
+                                n_voo_volta: e.target.value,
+                              })
+                            }
+                            className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white"
+                          />
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-3 gap-2">
+                        <div>
+                          <label className="text-slate-400 block mb-1">
+                            Cia Aérea
+                          </label>
+                          <select
+                            value={formVoo.ciaAereaVoltaSelect}
+                            onChange={(e) =>
+                              setFormVoo({
+                                ...formVoo,
+                                ciaAereaVoltaSelect: e.target.value,
+                              })
+                            }
+                            className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white"
+                          >
+                            {CIA_AEREAS_OPCOES.map((c) => (
+                              <option key={c} value={c}>
+                                {c}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="text-slate-400 block mb-1">
+                            Origem (Volta)
+                          </label>
+                          <select
+                            value={formVoo.aeroportoOrigemVoltaSelect}
+                            onChange={(e) =>
+                              setFormVoo({
+                                ...formVoo,
+                                aeroportoOrigemVoltaSelect: e.target.value,
+                              })
+                            }
+                            className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white"
+                          >
+                            {AEROPORTOS_OPCOES.map((a) => (
+                              <option key={a} value={a}>
+                                {a}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="text-slate-400 block mb-1">
+                            Destino (Volta)
+                          </label>
+                          <select
+                            value={formVoo.aeroportoDestinoVoltaSelect}
+                            onChange={(e) =>
+                              setFormVoo({
+                                ...formVoo,
+                                aeroportoDestinoVoltaSelect: e.target.value,
+                              })
+                            }
+                            className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white"
+                          >
+                            {AEROPORTOS_OPCOES.map((a) => (
+                              <option key={a} value={a}>
+                                {a}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                      {formVoo.ciaAereaVoltaSelect === 'Outra' && (
+                        <input
+                          type="text"
+                          placeholder="Outra Cia Volta"
+                          value={formVoo.ciaAereaVoltaOutra || ''}
+                          onChange={(e) =>
+                            setFormVoo({
+                              ...formVoo,
+                              ciaAereaVoltaOutra: e.target.value,
+                            })
+                          }
+                          className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white mt-1"
+                        />
+                      )}
+                      {formVoo.aeroportoOrigemVoltaSelect === 'Outro' && (
+                        <input
+                          type="text"
+                          placeholder="Outro Aeroporto Origem Volta"
+                          value={formVoo.aeroportoOrigemVoltaOutro || ''}
+                          onChange={(e) =>
+                            setFormVoo({
+                              ...formVoo,
+                              aeroportoOrigemVoltaOutro: e.target.value,
+                            })
+                          }
+                          className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white mt-1"
+                        />
+                      )}
+                      {formVoo.aeroportoDestinoVoltaSelect === 'Outro' && (
+                        <input
+                          type="text"
+                          placeholder="Outro Aeroporto Destino Volta"
+                          value={formVoo.aeroportoDestinoVoltaOutro || ''}
+                          onChange={(e) =>
+                            setFormVoo({
+                              ...formVoo,
+                              aeroportoDestinoVoltaOutro: e.target.value,
+                            })
+                          }
+                          className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white mt-1"
+                        />
+                      )}
+                      <div>
+                        <label className="text-slate-400 block mb-1">
+                          Horário Partida (Volta)
+                        </label>
+                        <div className="flex gap-1">
+                          <select
+                            value={formVoo.partida_volta_h}
+                            onChange={(e) =>
+                              setFormVoo({
+                                ...formVoo,
+                                partida_volta_h: e.target.value,
+                              })
+                            }
+                            className="bg-slate-900 border border-slate-700 rounded p-1.5 text-white flex-1"
+                          >
+                            {HORAS_DISPONIVEIS.map((h) => (
+                              <option key={h} value={h}>
+                                {h}
+                              </option>
+                            ))}
+                          </select>
+                          <span className="self-center">:</span>
+                          <select
+                            value={formVoo.partida_volta_m}
+                            onChange={(e) =>
+                              setFormVoo({
+                                ...formVoo,
+                                partida_volta_m: e.target.value,
+                              })
+                            }
+                            className="bg-slate-900 border border-slate-700 rounded p-1.5 text-white flex-1"
+                          >
+                            {MINUTOS_DISPONIVEIS.map((m) => (
+                              <option key={m} value={m}>
+                                {m}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="text-slate-400 block mb-1">Hotel</label>
+                      <select
+                        value={formVoo.hotelSelect}
+                        onChange={(e) =>
+                          setFormVoo({
+                            ...formVoo,
+                            hotelSelect: e.target.value,
+                          })
+                        }
+                        className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white"
+                      >
+                        {HOTEIS_OPCOES.map((h) => (
+                          <option key={h} value={h}>
+                            {h}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    {formVoo.hotelSelect === 'Outro' && (
+                      <input
+                        type="text"
+                        placeholder="Digite o nome do Hotel"
+                        value={formVoo.hotelOutro || ''}
+                        onChange={(e) =>
+                          setFormVoo({ ...formVoo, hotelOutro: e.target.value })
+                        }
+                        className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white"
+                      />
+                    )}
+
+                    <div>
+                      <label className="text-slate-400 block mb-1">
+                        Observações
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="Alguma observação sobre sua chegada ou bagagem?"
+                        value={formVoo.observacoes}
+                        onChange={(e) =>
+                          setFormVoo({
+                            ...formVoo,
+                            observacoes: e.target.value,
+                          })
+                        }
+                        className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white"
+                      />
+                    </div>
+
+                    <div className="pt-2">
+                      <button
+                        type="submit"
+                        className="w-full bg-emerald-600 hover:bg-emerald-500 py-2.5 rounded-lg font-semibold text-white cursor-pointer shadow"
+                      >
+                        Enviar Dados para a Equipe da Logística
+                      </button>
+                    </div>
+                  </form>
                 </div>
               )}
-              {voos.map((voo) => (
-                <div
-                  key={voo.id}
-                  className="bg-slate-800 border border-slate-700 rounded-xl p-4 shadow space-y-3 text-xs relative"
+            </div>
+          </div>
+        )}
+
+        {/* ABA RESTRITA: EQUIPE DA LOGÍSTICA (SENHA DE 6 DÍGITOS) */}
+        {abaAtiva === 'logistica' && (
+          <div className="space-y-6">
+            {!logisticaAutenticada ? (
+              <div className="bg-slate-800 border border-slate-700 rounded-xl p-6 max-w-md mx-auto shadow-lg space-y-4">
+                <div className="text-center space-y-1">
+                  <div className="text-2xl">🔒</div>
+                  <h2 className="text-base font-bold text-emerald-400">
+                    Acesso Restrito — Equipe da Logística
+                  </h2>
+                  <p className="text-xs text-slate-400">
+                    Digite a senha de 6 dígitos para visualizar a lista ordenada
+                    de chegadas e definir os responsáveis por cada amigo.
+                  </p>
+                </div>
+
+                {erroSenhaLogistica && (
+                  <div className="bg-red-950/60 border border-red-500/40 text-red-200 text-xs p-3 rounded-lg text-center">
+                    {erroSenhaLogistica}
+                  </div>
+                )}
+
+                <form
+                  onSubmit={handleAutenticarLogistica}
+                  className="space-y-3"
                 >
-                  <div className="flex justify-between items-center border-b border-slate-700 pb-2">
-                    <div className="font-bold text-emerald-400 text-sm">
-                      👤 {voo.amigo_nome}
+                  <div>
+                    <label className="text-xs text-slate-400 block mb-1">
+                      Senha de 6 dígitos
+                    </label>
+                    <input
+                      type="password"
+                      maxLength={6}
+                      inputMode="numeric"
+                      required
+                      placeholder="••••••"
+                      value={senhaLogisticaInput}
+                      onChange={(e) => setSenhaLogisticaInput(e.target.value)}
+                      className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-center text-base tracking-widest text-white"
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    className="w-full bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold py-2.5 rounded-lg transition cursor-pointer"
+                  >
+                    Acessar Painel da Logística
+                  </button>
+                </form>
+              </div>
+            ) : (
+              <div className="space-y-6">
+                {/* Resumo + Controles */}
+                <div className="bg-slate-800/90 border border-slate-700 rounded-xl p-4 space-y-4">
+                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+                    <div>
+                      <h2 className="text-sm font-bold text-emerald-400 uppercase tracking-wider">
+                        📋 Painel da Equipe de Logística (Ordem de Chegada)
+                      </h2>
+                      <p className="text-xs text-slate-400">
+                        Lista ordenada por data e horário de chegada para
+                        designação de responsáveis.
+                      </p>
                     </div>
                     <div className="flex gap-2">
                       <button
-                        onClick={() => abrirEdicaoVoo(voo)}
-                        className="bg-amber-600 hover:bg-amber-500 text-white px-3 py-1 rounded cursor-pointer"
+                        onClick={() => {
+                          setVooEmEdicao(null)
+                          setFormVoo(estadoInicialFormVoo)
+                          setModalVoo(true)
+                        }}
+                        className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold px-3 py-1.5 rounded-lg cursor-pointer"
                       >
-                        ✏️ Editar
+                        + Cadastrar Voo
                       </button>
                       <button
-                        onClick={() => handleExcluirVoo(voo.id)}
-                        className="bg-red-900 hover:bg-red-700 text-red-200 px-3 py-1 rounded cursor-pointer"
+                        onClick={() => {
+                          setLogisticaAutenticada(false)
+                          setSenhaLogisticaInput('')
+                        }}
+                        className="bg-slate-700 hover:bg-slate-600 text-slate-200 text-xs px-3 py-1.5 rounded-lg cursor-pointer"
                       >
-                        🗑️ Excluir
+                        🔒 Sair
                       </button>
                     </div>
                   </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-700/50 space-y-1">
-                      <div className="font-semibold text-emerald-300">
-                        🛫 Voo de IDA
+
+                  {/* Indicadores */}
+                  <div className="grid grid-cols-3 gap-2 text-center">
+                    <div className="bg-slate-900/70 border border-slate-700/70 rounded-lg p-2.5">
+                      <div className="text-lg font-bold text-white">
+                        {voos.length}
                       </div>
-                      <div>
-                        <strong>Data:</strong> {voo.data_ida || '-'}
-                      </div>
-                      <div>
-                        <strong>N° Voo:</strong> {voo.n_voo_ida || '-'} |{' '}
-                        <strong>Cia:</strong> {voo.cia_aerea_ida || '-'}
-                      </div>
-                      <div>
-                        <strong>Rota:</strong> {voo.aeroporto_origem || '-'} →{' '}
-                        {voo.aeroporto_destino || '-'}
-                      </div>
-                      <div>
-                        <strong>Partida:</strong> {voo.partida_ida || '-'} |{' '}
-                        <strong>Chegada:</strong> {voo.chegada_ida || '-'}
+                      <div className="text-[11px] text-slate-400">
+                        Total de Amigos
                       </div>
                     </div>
-                    <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-700/50 space-y-1">
-                      <div className="font-semibold text-amber-300">
-                        🛬 Voo de VOLTA
+                    <div className="bg-emerald-950/40 border border-emerald-500/30 rounded-lg p-2.5">
+                      <div className="text-lg font-bold text-emerald-400">
+                        {totalComResponsavel}
                       </div>
-                      <div>
-                        <strong>Data:</strong> {voo.data_volta || '-'}
+                      <div className="text-[11px] text-emerald-300">
+                        Com Responsável
                       </div>
-                      <div>
-                        <strong>N° Voo:</strong> {voo.n_voo_volta || '-'} |{' '}
-                        <strong>Cia:</strong> {voo.cia_aerea_volta || '-'}
+                    </div>
+                    <div className="bg-amber-950/40 border border-amber-500/30 rounded-lg p-2.5">
+                      <div className="text-lg font-bold text-amber-400">
+                        {totalSemResponsavel}
                       </div>
-                      <div>
-                        <strong>Rota:</strong>{' '}
-                        {voo.aeroporto_origem_volta || '-'} →{' '}
-                        {voo.aeroporto_destino_volta || '-'}
-                      </div>
-                      <div>
-                        <strong>Horário Partida:</strong>{' '}
-                        {voo.partida_volta || '-'}
+                      <div className="text-[11px] text-amber-300">
+                        Sem Responsável
                       </div>
                     </div>
                   </div>
-                  <div className="bg-slate-900/40 p-2 rounded-lg">
-                    🏨 <strong>Hotel:</strong> {voo.hotel || 'Não informado'}
+
+                  {/* Filtros da Equipe de Logística */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-2 border-t border-slate-700/60">
+                    <select
+                      value={filtroDataLogistica}
+                      onChange={(e) => setFiltroDataLogistica(e.target.value)}
+                      className="bg-slate-900 border border-slate-700 rounded-lg p-2 text-xs text-white cursor-pointer"
+                    >
+                      <option value="TODAS">
+                        📅 Todas as Datas de Chegada
+                      </option>
+                      {datasChegadaVoos.map((d) => (
+                        <option key={d} value={d}>
+                          Chegada em: {d}
+                        </option>
+                      ))}
+                    </select>
+
+                    <select
+                      value={filtroStatusResponsavel}
+                      onChange={(e) =>
+                        setFiltroStatusResponsavel(e.target.value)
+                      }
+                      className="bg-slate-900 border border-slate-700 rounded-lg p-2 text-xs text-white cursor-pointer"
+                    >
+                      <option value="TODOS">
+                        👥 Todos (Com e Sem Responsável)
+                      </option>
+                      <option value="SEM_RESPONSAVEL">
+                        ⚠️ Pendentes (Sem Responsável)
+                      </option>
+                      <option value="COM_RESPONSAVEL">
+                        ✅ Já atribuídos (Com Responsável)
+                      </option>
+                    </select>
                   </div>
-                  {voo.observacoes && (
-                    <div className="text-slate-400 italic text-[11px]">
-                      Obs: {voo.observacoes}
-                    </div>
-                  )}
                 </div>
-              ))}
-            </div>
+
+                {/* Lista Ordenada por Data e Horário de Chegada */}
+                {datasLogisticaOrdenadas.length === 0 ? (
+                  <div className="bg-slate-800/50 border border-slate-700/50 rounded-xl p-6 text-center text-xs text-slate-400">
+                    Nenhum registro de voo encontrado para este filtro.
+                  </div>
+                ) : (
+                  datasLogisticaOrdenadas.map((dataChegada) => (
+                    <div key={dataChegada} className="space-y-3">
+                      <div className="flex items-center justify-between bg-emerald-950/40 border border-emerald-500/30 px-4 py-2 rounded-lg">
+                        <span className="text-emerald-400 font-bold text-sm">
+                          📅 Chegadas em: {dataChegada}
+                        </span>
+                        <span className="text-[11px] text-slate-400">
+                          {voosPorDataChegada[dataChegada].length}{' '}
+                          {voosPorDataChegada[dataChegada].length === 1
+                            ? 'amigo chegando'
+                            : 'amigos chegando'}
+                        </span>
+                      </div>
+
+                      <div className="space-y-3">
+                        {voosPorDataChegada[dataChegada].map((voo, index) => {
+                          const temResponsavel = Boolean(
+                            voo.responsavel && voo.responsavel.trim()
+                          )
+                          return (
+                            <div
+                              key={voo.id}
+                              className="bg-slate-800 border border-slate-700 rounded-xl p-4 shadow space-y-3 text-xs"
+                            >
+                              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b border-slate-700 pb-2.5">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="bg-emerald-600 text-white font-bold px-2 py-0.5 rounded text-[11px]">
+                                    #{index + 1}
+                                  </span>
+                                  <span className="bg-slate-900 border border-emerald-500/40 text-emerald-300 font-bold px-2.5 py-0.5 rounded text-xs">
+                                    🛬 Chegada: {voo.chegada_ida || '--:--'}
+                                  </span>
+                                  <span className="font-bold text-white text-sm">
+                                    👤 {voo.amigo_nome}
+                                  </span>
+                                  {temResponsavel ? (
+                                    <span className="bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 px-2 py-0.5 rounded text-[11px] font-semibold">
+                                      ✅ Resp: {voo.responsavel}
+                                    </span>
+                                  ) : (
+                                    <span className="bg-amber-500/15 border border-amber-500/30 text-amber-300 px-2 py-0.5 rounded text-[11px] font-semibold">
+                                      ⚠️ Sem responsável
+                                    </span>
+                                  )}
+                                </div>
+
+                                <div className="flex gap-2">
+                                  <button
+                                    onClick={() => abrirEdicaoVoo(voo)}
+                                    className="bg-amber-600/80 hover:bg-amber-500 text-white px-2.5 py-1 rounded cursor-pointer text-[11px]"
+                                  >
+                                    ✏️ Editar
+                                  </button>
+                                  <button
+                                    onClick={() => handleExcluirVoo(voo.id)}
+                                    className="bg-red-900/70 hover:bg-red-700 text-red-200 px-2.5 py-1 rounded cursor-pointer text-[11px]"
+                                  >
+                                    🗑️ Excluir
+                                  </button>
+                                </div>
+                              </div>
+
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-700/50 space-y-1">
+                                  <div className="font-semibold text-emerald-300">
+                                    🛫 Voo de IDA (Chegada)
+                                  </div>
+                                  <div>
+                                    <strong>Data:</strong> {voo.data_ida || '-'}{' '}
+                                    | <strong>Chegada:</strong>{' '}
+                                    <span className="text-emerald-300 font-bold">
+                                      {voo.chegada_ida || '-'}
+                                    </span>{' '}
+                                    (Partida: {voo.partida_ida || '-'})
+                                  </div>
+                                  <div>
+                                    <strong>Cia / Voo:</strong>{' '}
+                                    {voo.cia_aerea_ida || '-'} {voo.n_voo_ida}
+                                  </div>
+                                  <div>
+                                    <strong>Rota:</strong>{' '}
+                                    {voo.aeroporto_origem || '-'} →{' '}
+                                    {voo.aeroporto_destino || '-'}
+                                  </div>
+                                </div>
+
+                                <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-700/50 space-y-1">
+                                  <div className="font-semibold text-amber-300">
+                                    🛬 Voo de VOLTA (Retorno)
+                                  </div>
+                                  <div>
+                                    <strong>Data:</strong>{' '}
+                                    {voo.data_volta || '-'} |{' '}
+                                    <strong>Partida:</strong>{' '}
+                                    {voo.partida_volta || '-'}
+                                  </div>
+                                  <div>
+                                    <strong>Cia / Voo:</strong>{' '}
+                                    {voo.cia_aerea_volta || '-'}{' '}
+                                    {voo.n_voo_volta}
+                                  </div>
+                                  <div>
+                                    <strong>Rota:</strong>{' '}
+                                    {voo.aeroporto_origem_volta || '-'} →{' '}
+                                    {voo.aeroporto_destino_volta || '-'}
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="flex flex-col sm:flex-row justify-between gap-2 bg-slate-900/40 p-2.5 rounded-lg">
+                                <div>
+                                  🏨 <strong>Hotel:</strong>{' '}
+                                  {voo.hotel || 'Não informado'}
+                                </div>
+                                {voo.observacoes && (
+                                  <div className="text-slate-400 italic">
+                                    📝 <strong>Obs:</strong> {voo.observacoes}
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Campo para escolher/salvar o Responsável */}
+                              <div className="bg-slate-900/90 border border-slate-700 p-3 rounded-lg flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                                <label className="text-slate-300 font-semibold whitespace-nowrap">
+                                  🤝 Responsável por cuidar/recepcionar:
+                                </label>
+                                <input
+                                  type="text"
+                                  placeholder="Digite o nome do responsável da equipe..."
+                                  value={
+                                    responsaveisEdit[String(voo.id)] ??
+                                    voo.responsavel ??
+                                    ''
+                                  }
+                                  onChange={(e) =>
+                                    setResponsaveisEdit({
+                                      ...responsaveisEdit,
+                                      [String(voo.id)]: e.target.value,
+                                    })
+                                  }
+                                  className="flex-1 bg-slate-800 border border-slate-600 rounded px-3 py-1.5 text-white"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    handleSalvarResponsavel(voo.id)
+                                  }
+                                  disabled={
+                                    salvandoResponsavelId === String(voo.id)
+                                  }
+                                  className="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold px-4 py-1.5 rounded transition cursor-pointer whitespace-nowrap"
+                                >
+                                  {salvandoResponsavelId === String(voo.id)
+                                    ? 'Salvando...'
+                                    : salvoResponsavelId === String(voo.id)
+                                    ? '✓ Salvo!'
+                                    : 'Salvar Responsável'}
+                                </button>
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
           </div>
         )}
 
@@ -1353,12 +2279,12 @@ export default function PainelLogistica() {
               >
                 <div>
                   <label className="text-slate-400 block mb-1">
-                    Seu Nome Completo
+                    Seu Nome
                   </label>
                   <input
                     type="text"
                     required
-                    placeholder="Digite seu nome"
+                    placeholder="Digite seu nome (ou como prefere ser chamado)"
                     value={nomePassageiro}
                     onChange={(e) => setNomePassageiro(e.target.value)}
                     className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white"
@@ -1388,7 +2314,7 @@ export default function PainelLogistica() {
           </div>
         )}
 
-        {/* Modal Voo */}
+        {/* Modal Voo (usado pela Equipe de Logística para editar/adicionar) */}
         {modalVoo && (
           <div className="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50">
             <div className="bg-slate-800 border border-slate-700 rounded-xl p-6 w-full max-w-lg space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
@@ -1409,7 +2335,7 @@ export default function PainelLogistica() {
                   <input
                     type="text"
                     required
-                    placeholder="Digite seu nome"
+                    placeholder="Digite o nome"
                     value={formVoo.amigo_nome}
                     onChange={(e) =>
                       setFormVoo({ ...formVoo, amigo_nome: e.target.value })
@@ -1860,6 +2786,21 @@ export default function PainelLogistica() {
                     className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white"
                   />
                 )}
+
+                <div>
+                  <label className="text-slate-400 block mb-1">
+                    Responsável pela recepção (opcional)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Nome de quem vai cuidar/recepcionar"
+                    value={formVoo.responsavel || ''}
+                    onChange={(e) =>
+                      setFormVoo({ ...formVoo, responsavel: e.target.value })
+                    }
+                    className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white"
+                  />
+                </div>
 
                 <div>
                   <label className="text-slate-400 block mb-1">
