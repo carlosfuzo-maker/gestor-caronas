@@ -960,47 +960,45 @@ export default function PainelLogistica() {
                   />
                 </div>
 
-                {!caronaEmEdicao && (
-                  <div>
-                    <label className="text-slate-400 block mb-1">
-                      Tipo de Trajeto
-                    </label>
-                    <div className="grid grid-cols-2 gap-1 bg-slate-900 p-1 rounded-lg border border-slate-700">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setFormCarona({
-                            ...formCarona,
-                            tipo_trajeto: 'ida_volta',
-                          })
-                        }
-                        className={`py-1.5 px-2 rounded text-[11px] font-semibold transition cursor-pointer ${
-                          formCarona.tipo_trajeto === 'ida_volta'
-                            ? 'bg-emerald-600 text-white'
-                            : 'text-slate-400 hover:text-white'
-                        }`}
-                      >
-                        🔄 Ida e Volta
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setFormCarona({
-                            ...formCarona,
-                            tipo_trajeto: 'somente_ida',
-                          })
-                        }
-                        className={`py-1.5 px-2 rounded text-[11px] font-semibold transition cursor-pointer ${
-                          formCarona.tipo_trajeto === 'somente_ida'
-                            ? 'bg-emerald-600 text-white'
-                            : 'text-slate-400 hover:text-white'
-                        }`}
-                      >
-                        🛬 Somente Ida
-                      </button>
-                    </div>
+                <div>
+                  <label className="text-slate-400 block mb-1">
+                    Tipo de Trajeto
+                  </label>
+                  <div className="grid grid-cols-2 gap-1 bg-slate-900 p-1 rounded-lg border border-slate-700">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setFormCarona({
+                          ...formCarona,
+                          tipo_trajeto: 'ida_volta',
+                        })
+                      }
+                      className={`py-1.5 px-2 rounded text-[11px] font-semibold transition cursor-pointer ${
+                        formCarona.tipo_trajeto === 'ida_volta'
+                          ? 'bg-emerald-600 text-white'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      🔄 Ida e Volta
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setFormCarona({
+                          ...formCarona,
+                          tipo_trajeto: 'somente_ida',
+                        })
+                      }
+                      className={`py-1.5 px-2 rounded text-[11px] font-semibold transition cursor-pointer ${
+                        formCarona.tipo_trajeto === 'somente_ida'
+                          ? 'bg-emerald-600 text-white'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      🛬 Somente Ida
+                    </button>
                   </div>
-                )}
+                </div>
 
                 <div className="grid grid-cols-2 gap-2">
                   <div>
@@ -1150,7 +1148,7 @@ export default function PainelLogistica() {
                   </div>
                 </div>
 
-                {!caronaEmEdicao && formCarona.tipo_trajeto === 'ida_volta' && (
+                {formCarona.tipo_trajeto === 'ida_volta' && (
                   <div className="grid grid-cols-2 gap-2 bg-slate-900/40 p-2.5 rounded-lg border border-slate-700/50">
                     <div>
                       <label className="text-slate-400 block mb-1">
